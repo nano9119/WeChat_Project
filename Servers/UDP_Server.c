@@ -1,6 +1,6 @@
 /**
  * -----------------------------------------------------------
- *  Crafted by Rawan & Copilot | April 2025
+ *  Crafted by nano9119 | April 2025
  *  A multi-threaded, UDP-powered beast built with passion. 
  *  This isn't just a college project—it's a legacy.
  * -----------------------------------------------------------
@@ -11,6 +11,7 @@
 #include <winsock2.h> //windows sockets API for networking
 #include <time.h>     //time library to generate timestamps for file names
 #include <windows.h>  //windows threading and synchronization
+#include <direct.h>   //for directory creation on Windows
 
 #pragma comment(lib,"ws2_32.lib") //link Winsock2 library to enable networking functions
 
@@ -64,6 +65,9 @@ DWORD WINAPI broadcastIPThread(LPVOID lpParam) {
 DWORD WINAPI receiveFileThread(LPVOID lpParam) {
     char fileBuffer[BUFFER_SIZE_FILE]; //buffer for  receiving file chunks
     int fileOpenFlag = 0;             //flag to track if the file is opened
+
+    _mkdir(SAVE_DIR);                 //Create "received_files/" folder
+
     while(1) {
         //listen for incoming data packets from a client
         int bytesReceived = recvfrom(fileSocket, fileBuffer, BUFFER_SIZE_FILE, 0, (struct sockaddr *)&clientAddr, &clientAddrLen);
@@ -76,6 +80,7 @@ DWORD WINAPI receiveFileThread(LPVOID lpParam) {
         //end of file checker (EOF)
         if(strcmp(fileBuffer,"EOF") == 0) {
             newFileReady = 1; //trigger the broadcasting thread
+            fileOpenFlag = 0; //reset the flag so a new file is created for the next transmission
             printf("End of file received, ready to broadcast...!\n");
             continue;
         }
