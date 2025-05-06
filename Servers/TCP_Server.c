@@ -1,190 +1,243 @@
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <ctype.h> //for isspcae() 
-#include <winsock2.h>
-#include <windows.h> //for CreateThread
+#include <stdio.h>        //standard I/O functions
+#include <winsock2.h> //windows sockets API for networking
+#include <windows.h>  //windows threading & synchronization functions
+#include <time.h>         //time functions for logging
+#include <direct.h>       //directory management
 
 
-#pragma comment(lib,"ws2_32.lib") //linking with winsock library
+#pragma comment(lib,"ws2_32.lib") //link Winsock2 library
 
-#define text_buffer_size 1024     //1KB for text messages
+//configuration of constants
+#define SERVER_PORT 9090            //port for client file transfers
+#define MAX_CLIENTS 10              //maximum number of connected clients 
+#define BUFFER_SIZE 4096            //buffer size for file transfer
+#define SAVE_DIR "received_files/"  //directory to store received files
+#define LOG_FILE "TCP_server_log.txt"   //log file to record transfers
 
-//global variables decleration for broadcasting the messages
-SOCKET clients[FD_SETSIZE];
-int clients_count = 0;
-CRITICAL_SECTION client_list_lock;
+//global variables
+CRITICAL_SECTION fileLock;      //synchronization lock for shared file access
+volatile int newFileReady = 0;  //flag indicating a new file is ready to broadcast
+volatile int serverRunning = 1; //flag to allow graceful shutdown
+char lastReceivedFile[256];     //stores the most recently received file name
 
-//a function to check if the string sent by client is empty or having whiteSpaces
-int is_empty_or_whitespace(const char *str) {
-while(*str) {
-    if(!isspace(*str)) {
-        return 0;//string is not empty there is a character in it
-        }
-        str++;//move to the next character
+//maintaining a list of connected clients for broadcasting
+SOCKET clientSockets[MAX_CLIENTS]; //array to store clinet sockets
+int clientCount = 0;               //tracks number of connected clients 
+
+//structure to store connected client information
+typedef struct {
+    SOCKET clientSocket; //client socket descriptor
+    int id;              //unique identifier for the client
+} ClientInfo;
+
+//threads and functions initial declaration
+DWORD WINAPI receiveFileThread(LPVOID lpParam);   //handles file reception
+DWORD WINAPI broadcastFileThread(LPVOID lpParam); //handles file broadcasting
+void addClient(SOCKET clientSocket);              //adds a client to list
+void removeClient(SOCKET clientSocket);          //removes a client from list
+void logMessage(const char *message);             //logs events to file
+
+int main(){
+    //winsock initializtion
+    WSADATA wsa;
+    SOCKET serverSocket, clientSocket;
+    struct sockaddr_in serverAddr, clientAddr;
+    int clientAddrLen = sizeof(clientAddr);
+
+    if(WSAStartup(MAKEWORD(2,2),&wsa) != 0) {
+        printf("Winsock initialization failed : %d\n", WSAGetLastError());
+        return 1;
     }
-    return 1;//string is empty or contains only of whiteSpaces
-}
 
-//adding the clients to the global list
-void add_client(SOCKET client_fd) {
-    EnterCriticalSection(&client_list_lock);
-    clients[clients_count++] = client_fd;
-    LeaveCriticalSection(&client_list_lock);
-}
+    //initialize critical section for thread safety
+    InitializeCriticalSection(&fileLock);
 
-//removing the clients from the global list
-void remove_client(SOCKET client_fd) {
-    EnterCriticalSection(&client_list_lock);
-    for (int i = 0; i < clients_count;i++) {
-        if(clients[i] == client_fd) {
-            clients[i] = clients[--clients_count];
-            printf("Client removed successfully.\nRemaining clients : %d\n", clients_count);
-            break;//exit loop after removal
-        }
+    //create directory for received files
+    _mkdir(SAVE_DIR);
+
+    //creating TCP server socket
+    serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if(serverSocket == INVALID_SOCKET) {
+        printf("Failed to create TCP socket : %d\n", WSAGetLastError());
+        WSACleanup();
+        return 1;
     }
-    LeaveCriticalSection(&client_list_lock);
+
+    //binding server socket
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    serverAddr.sin_port = htons(SERVER_PORT);
+
+    if(bind(serverSocket,(struct sockaddr*)&serverAddr,sizeof(serverAddr)) == SOCKET_ERROR) {
+        printf("Binding failed : %d\n", WSAGetLastError());
+        closesocket(serverSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    //start listening for incoming connections
+    listen(serverSocket, MAX_CLIENTS);
+    printf("Server listening on port %d...\n", SERVER_PORT);
+    logMessage("Server started and listening for connections.");
+
+    //start broadcast thread
+    HANDLE hBroadcastThread = CreateThread(NULL, 0, broadcastFileThread, NULL, 0, NULL);
+
+    while(serverRunning) {
+        //accept new clients
+        clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
+        if(clientSocket == INVALID_SOCKET) {
+            printf("Accept failed : %d\n", WSAGetLastError());
+            continue;
+        }
+        printf("New client connected!\n");
+        logMessage("New client connected.");
+
+        //add client to list for broadcasting
+        addClient(clientSocket);
+
+        //create thread to handle file reception from this client
+        ClientInfo* clientInfo = (ClientInfo*)malloc(sizeof(ClientInfo));
+        clientInfo->clientSocket = clientSocket;
+        clientInfo->id = rand();
+        CreateThread(NULL, 0, receiveFileThread, clientInfo, 0, NULL);
+    }
+    closesocket(serverSocket);
+    WSACleanup();
+    DeleteCriticalSection(&fileLock);
+    return 0;
 }
 
-//broadcasting the massage to all clients except the sender 
-void broadcast_message(SOCKET sender_fd, const char *message) {
-    EnterCriticalSection(&client_list_lock);
-    for (int i = 0; i < clients_count; i++) {
-        if (clients[i] != sender_fd) { // Skip the sender
-            if (send(clients[i], message, strlen(message), 0) == SOCKET_ERROR) {
-                printf("Failed to send message to client %d.\n", i);
-                closesocket(clients[i]);
-                remove_client(clients[i]); // Remove problematic client
-                i--; // Adjust index for shifted array
+//function to log events
+void logMessage(const char *message) {
+    FILE *logFile = fopen(LOG_FILE, "a"); // Open log file in append mode
+    if (logFile) {
+        char timestamp[30]; // Buffer to hold the timestamp
+        time_t now = time(NULL);
+        struct tm *tm_info = localtime(&now);
+        strftime(timestamp, sizeof(timestamp), "[%Y-%m-%d %H:%M:%S]", tm_info); // Format timestamp
+
+        // Write formatted log entry
+        fprintf(logFile, "%s : %s\n", timestamp, message);
+        fclose(logFile);
+    }
+}
+
+
+//function to add client
+void addClient(SOCKET clientSocket) {
+    if(clientCount < MAX_CLIENTS) {
+        clientSockets[clientCount++] = clientSocket;
+    }
+}
+
+//function to remove client
+void removeClient(SOCKET clientSocket) {
+    for (int i = 0; i < clientCount;i++){
+        if(clientSockets[i] == clientSocket) {
+            for (int j = i; j < clientCount - 1;j++) {
+                clientSockets[j] = clientSockets[j + 1];
             }
-        }
-    }
-    LeaveCriticalSection(&client_list_lock);
-}
-
-
-//a function to handle communication with a single client
-DWORD WINAPI client_handler(LPVOID client_socket) {
-    SOCKET client_fd = *(SOCKET *)client_socket;
-    char text_buffer[text_buffer_size] = {0};
-//communication loop 
-    while (1) {
-        memset(text_buffer, 0, text_buffer_size); // Clear the buffer
-        int bytes_received = recv(client_fd, text_buffer, text_buffer_size - 1, 0); // Receive data
-        if (bytes_received > 0) {
-            text_buffer[bytes_received] = '\0'; // Null-terminate the received data
-            if (!is_empty_or_whitespace(text_buffer)) { // Validate message
-                printf("Client: %s\n", text_buffer);
-                broadcast_message(client_fd, text_buffer); // Broadcast the message
-            } else {
-                const char *warning_message = "Empty messages are not allowed!\n";
-                send(client_fd, warning_message, strlen(warning_message), 0);
-                printf("Empty message recieved from %d", clients[client_fd]);
-            }
-        } else if (bytes_received == 0) { // Client closed connection
-            printf("Client disconnected...!\n");
-            break; // Exit loop
-        } else { // Error occurred
-            printf("Error receiving data from client occurred.\n");
+            clientCount--;
             break;
         }
     }
+}
 
-    remove_client(client_fd);//remove client from broadcasting list
-    closesocket(client_fd);//close client socket
-    free(client_socket);//free memory
-    return 0;
-    }
+//thread to receive files
+DWORD WINAPI receiveFileThread(LPVOID lpParam) {
+    ClientInfo* clientInfo = (ClientInfo*)lpParam;
+    SOCKET clientSocket = clientInfo->clientSocket;
+    free(clientInfo); //free allocated memory after use
+    clientInfo = NULL;
 
-int main() {
-    WSADATA wsa;
-    SOCKET server_fd,client_fd;
-    struct sockaddr_in server_address,client_address;
-    int client_address_length = sizeof(client_address), port_number = 8080;
+    char buffer[BUFFER_SIZE];
+    FILE* file = NULL;
+    int fileOpenFlag = 0;
 
-    InitializeCriticalSection(&client_list_lock);//initialize client lock
-    //initialize winsock 
-    printf("Initializing Winsock...\n");
-    if(WSAStartup(MAKEWORD(2,2), &wsa) != 0) {
-        printf("Winsock Initialization Failed...!\nError Code : %d\n", WSAGetLastError());
-        DeleteCriticalSection(&client_list_lock);//cleanup client lock
-        return 1;
-    }
-    printf("Winsock Initialized successfully!\n");
-
-    //create the server socket
-    server_fd = socket(AF_INET,SOCK_STREAM,0); 
-    if(server_fd == INVALID_SOCKET) {
-        printf("Socket Creation Failed...!\nError Code : %d\n", WSAGetLastError());
-        WSACleanup();
-        DeleteCriticalSection(&client_list_lock);//cleanup client lock
-        return 1;
-    }
-
-    //bind the socket to the address and port number
-    server_address.sin_family = AF_INET;
-    server_address.sin_addr.s_addr = INADDR_ANY;
-    server_address.sin_port = htons(port_number);
-
-    if(bind(server_fd,(struct sockaddr *)&server_address,sizeof(server_address)) == SOCKET_ERROR) {
-        printf("Binding failed...!\nError Code : %d\n", WSAGetLastError());
-        closesocket(server_fd);
-        WSACleanup();
-        DeleteCriticalSection(&client_list_lock);//cleanup client lock
-        return 1;
-    }
-
-// Listen for incoming connections
-    if (listen(server_fd, 10) == SOCKET_ERROR) {
-        printf("Listening failed...!\nError Code: %d\n", WSAGetLastError());
-        closesocket(server_fd);
-        WSACleanup();
-        DeleteCriticalSection(&client_list_lock);//cleanup client lock
-        return 1;
-    }
-    printf("Server is listening now on port %d\n", port_number);
-
-    while(1) {
-        //accept incoming connection from client
-        client_fd = accept(server_fd, (struct sockaddr *)&client_address, &client_address_length);
-        if(client_fd == INVALID_SOCKET) {
-            printf("Failed to accept connection...!\n");
-            continue;//skip this client
+    while(serverRunning) {
+        int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE, 0);
+        if (bytesReceived <= 0) {
+            printf("Client disconnected.\n");
+            logMessage("Client disconnected.");
+            removeClient(clientSocket);
+            closesocket(clientSocket);
+            return 0;
         }
-        printf("Client connected successfully.\n");
 
-        // memory allocation for client_fd
-        SOCKET *client_socket = malloc(sizeof(SOCKET));
-        *client_socket = client_fd;
+        //critical section protection
+        EnterCriticalSection(&fileLock);
 
-        //notify all other clients about the new connection
-        char connect_message[text_buffer_size];
-        snprintf(connect_message, sizeof(connect_message),
-        "A new client has joined the chat.Say hello...!");
-        broadcast_message(client_fd, connect_message);
+        // Check for metadata (Header or EOF packets)
+        if (strncmp(buffer, "[METADATA] ", 11) == 0) {
+            sscanf(buffer + 11, "%s", lastReceivedFile);
+            printf("Receiving file: %s\n", lastReceivedFile);
+            logMessage("Receiving new file.");
 
-        add_client(client_fd); //it has been put after the notification block in order to prevent the same person from being notified
-
-        //create a new thread to handle the client
-        HANDLE thread = CreateThread(NULL, 0, client_handler, client_socket, 0, NULL);
-        if(thread == NULL) {
-        printf("Failed to create thread for client...!\n");
-        closesocket(client_fd);
-        free(client_socket);//free the allocated memory
-        remove_client(client_fd);
+            file = fopen(lastReceivedFile, "wb");
+            if (!file) {
+                printf("Error opening file.\n");
+                LeaveCriticalSection(&fileLock);
+                continue;
+            }
+            fileOpenFlag = 1;
         }
-        else {
-            CloseHandle(thread);//close the thread handle if successfully created
+        else if (fileOpenFlag && strncmp(buffer, "[EOF]", 5) != 0) {
+            fwrite(buffer, sizeof(char), bytesReceived, file);
+        } else if (fileOpenFlag && strncmp(buffer, "[EOF]", 5) == 0) {
+            printf("File received successfully!\n");
+            logMessage("File received.");
+            fclose(file);
+            fileOpenFlag = 0;
+            newFileReady = 1;
         }
+        LeaveCriticalSection(&fileLock);
     }
-    // Clean up server resources during shutdown
-    closesocket(server_fd); // Close server socket
-    EnterCriticalSection(&client_list_lock); // Ensure no race conditions
-    for (int i = 0; i < clients_count; i++) {
-    closesocket(clients[i]); // Close all client sockets
+}
+
+//thread to broadcast files 
+DWORD WINAPI broadcastFileThread(LPVOID lpParam) {
+    while(serverRunning) {
+        if(newFileReady) {
+            EnterCriticalSection(&fileLock);
+            FILE* file = fopen(lastReceivedFile, "rb");
+            if(!file) {
+                LeaveCriticalSection(&fileLock);
+                continue;
+            }
+
+            printf("Broadcasting file : %s\n", lastReceivedFile);
+            logMessage("Broadcasting file.");
+
+            char buffer[BUFFER_SIZE];
+
+            // Send HEADER packet first
+            sprintf(buffer, "[METADATA] %s", lastReceivedFile);
+            for (int i = 0; i < clientCount; i++) {
+                send(clientSockets[i], buffer, strlen(buffer), 0);
+            }
+
+             // Send raw binary file data
+            size_t bytesRead;
+            while ((bytesRead = fread(buffer, sizeof(char), BUFFER_SIZE, file)) > 0) {
+                for (int i = 0; i < clientCount; i++) {
+                    send(clientSockets[i], buffer, bytesRead, 0); // Binary data only
+                }
+            }
+
+            // Send EOF packet
+            strcpy(buffer, "[EOF]");
+            for (int i = 0; i < clientCount; i++) {
+                send(clientSockets[i], buffer, strlen(buffer), 0);
+            }
+
+
+            fclose(file);
+            newFileReady = 0;
+
+            LeaveCriticalSection(&fileLock);
+        }
+        Sleep(500);
     }
-    LeaveCriticalSection(&client_list_lock);
-    DeleteCriticalSection(&client_list_lock); // Cleanup critical section
-    WSACleanup(); // Cleanup Winsock
     return 0;
 }

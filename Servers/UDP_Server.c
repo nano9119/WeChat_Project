@@ -1,198 +1,207 @@
-/**
- * -----------------------------------------------------------
- *  Crafted by nano9119 | April 2025
- *  A multi-threaded, UDP-powered beast built with passion. 
- *  This isn't just a college project—it's a legacy.
- * -----------------------------------------------------------
- */
-#include <stdio.h>    //standard I/O library for printing logs
-#include <stdlib.h>   //standard library for memory management
-#include <string.h>   //string manipulation functions
-#include <winsock2.h> //windows sockets API for networking
-#include <time.h>     //time library to generate timestamps for file names
-#include <windows.h>  //windows threading and synchronization
-#include <direct.h>   //for directory creation on Windows
+#include <stdio.h>     //standard I/O library for printing logs and debugging
+#include <winsock2.h>  //windows sockets API for networking
+#include <windows.h>   //windows threading and synchronization functions
+#include <time.h>      //for logging the events with their timestamps
 
-#pragma comment(lib,"ws2_32.lib") //link Winsock2 library to enable networking functions
+#pragma comment(lib,"ws2_32.lib") //link Winsock2 library for networking
 
-//define networking ports for different functionalities
-#define SERVER_PORT 9090               //port for receiving text files
-#define IP_BROADCAST_PORT 9091         //port for broadcasting IP address
-#define FILE_BROADCAST_PORT 9092       //port for broadcasting text files
-#define BROADCAST_IP "255.255.255.255" //broadcast address
+//define constants for ports , buffer sizes and broadcast IP address
+#define IP_BROADCAST_PORT 9091         //port for broadcassting the server's IP address
+#define MESSAGE_RECEIVE_PORT 9092      //port for receiving messages from clients
+#define MESSAGE_BROADCAST_PORT 9093    //port for broadcasting messages to all clients
+#define BROADCAST_IP "255.255.255.255" //broadcast IP to send data to all clients 
+#define BUFFER_SIZE_IP 50              //buffer size for storing the serve's IP address
+#define BUFFER_SIZE_MSG 2048           //buffer size for receiving and broadcasting messages
+#define LOG_FILE "UDP_server_log.txt"  // log file to store events with timestamps
 
-//buffer sizes for handling data
-#define BUFFER_SIZE_IP 50              //IP buffer size
-#define BUFFER_SIZE_FILE 2048          //file data buffer size
-#define SAVE_DIR "received_files/"     //directory to store received files
+//global variables for server control and sockets
+volatile int serverRunning = 1; //flag to determine whether the server is running or not
+WSADATA wsa;                    //holds windows socket initialization data
+SOCKET ipBroadcastSocket, messageReceiveSocket, messageBroadcastSocket; //three sockets for IP broadcasting , message receiving , and message broadcasting 
+struct sockaddr_in ipBroadcastAddr, msgReceiveAddr, msgBroadcastAddr;   //structures to store address configurations
+char serverIP[BUFFER_SIZE_IP];             //buffer to store server's IP address
+char lastReceivedMessage[BUFFER_SIZE_MSG]; //buffer to store the last received message
 
-//define global variables for network sockets and addresses
-WSADATA wsa;                                                                   //structure to hold windows socket data
-SOCKET ipBroadcastSocket, fileBroadcastSocket, fileSocket;                     //sockets for networking
-struct sockaddr_in ipBroadcastAddr, fileBroadcastAddr, serverAddr, clientAddr; //structures to store address info
-char serverIP[BUFFER_SIZE_IP];                                                 //buffer to hold server's IP address 
-int clientAddrLen = sizeof(clientAddr);                                        //size of client address structure
+//function to log events
+void logMessage(const char *message) {
+    FILE *logFile = fopen(LOG_FILE, "a"); // Open log file in append mode
+    if (logFile) {
+        char timestamp[30]; // Buffer to hold the timestamp
+        time_t now = time(NULL);
+        struct tm *tm_info = localtime(&now);
+        strftime(timestamp, sizeof(timestamp), "[%Y-%m-%d %H:%M:%S]", tm_info); // Format timestamp
 
-//synchronization mechanism using a critical section for thread safety
-CRITICAL_SECTION fileLock;     //protects shared file access
-volatile int newFileReady = 0; //flag indicating a new file is ready for broadcasting
-char lastReceivedFile[100];    //stores the latest received file name
+        // Write formatted log entry
+        fprintf(logFile, "%s : %s\n", timestamp, message);
+        fclose(logFile);
+    }
+}
 
-//a function to get the server's dynamic IP address(the IP address is stored in the buffer)
+//function to retrieve the server's dynamic IP address
 void getServerIP(char *ipBuffer) {
-    WSAStartup(MAKEWORD(2, 2), &wsa);                                          //initialize Winsock API
-    char hostname[256];
-    gethostname(hostname, sizeof(hostname));                                   //get the hostname of the local machine
-    struct hostent *host = gethostbyname(hostname);                            //get host details based on the hostname
-    strcpy(ipBuffer, inet_ntoa(*(struct in_addr *)host->h_addr_list[0]));      //extract the IP address
-    WSACleanup();                                                              //cleanup Winsock after retrieving IP address
+    char hostname[256]; //buffer to store the hostname of the local machine
+
+    //retry getting the hostname if an error occurs
+    while(gethostname(hostname,sizeof(hostname)) == SOCKET_ERROR) {
+        printf("Error getting hostname : %d\n", WSAGetLastError());
+        Sleep(1000); //wait 2 seconds before retrying
+    }
+
+    struct hostent *host = gethostbyname(hostname); //get host details based on the hostname
+    if(host == NULL) {
+        printf("Error getting host info : %d\n", WSAGetLastError());
+        return;
+    }
+
+    //store the IP address found to ipBuffer
+    strcpy(ipBuffer, inet_ntoa(*(struct in_addr *)host->h_addr_list[0]));
 }
 
-//thread function to broadcast the server's IP address every 3 seconds
+//thread to continuously broadcast the server's IP address (every 3 seconds)
 DWORD WINAPI broadcastIPThread(LPVOID lpParam) {
-    printf("Broadcasting server IP : %s\n", serverIP);
-    while(1) {
-        //send IP address over UDP
+    printf("Server IP address is being broadcasted every 3 seconds.\n");
+    logMessage("Server IP address is being broadcasted every 3 seconds.");
+    while(serverRunning){
         if(sendto(ipBroadcastSocket,serverIP,strlen(serverIP),0,(struct sockaddr *)&ipBroadcastAddr,sizeof(ipBroadcastAddr)) == SOCKET_ERROR) {
-            printf("Error sending IP broadcast : %d\n", WSAGetLastError());
+            printf("Failed to send IP broadcast.\n");
+            logMessage("Failed to send IP broadcast.");
         }
-        Sleep(3000); //broadcasting every 3 seconds
+        Sleep(3000); //broadcast every 3 seconds
     }
     return 0;
 }
 
-//thread function to receive incoming text files
-DWORD WINAPI receiveFileThread(LPVOID lpParam) {
-    char fileBuffer[BUFFER_SIZE_FILE]; //buffer for  receiving file chunks
-    int fileOpenFlag = 0;             //flag to track if the file is opened
+//thread to continuously listen for incoming text messages from clients
+DWORD WINAPI receiveMessageThread(LPVOID lpParam) {
+    char buffer[BUFFER_SIZE_MSG];     //buffer for incoming messages
+    struct sockaddr_in clientAddr;    //stores clients address info
+    int addrLen = sizeof(clientAddr); //size of the client address structure
 
-    _mkdir(SAVE_DIR);                 //Create "received_files/" folder
+    while(serverRunning){
+        int receivedBytes = recvfrom(messageReceiveSocket, buffer, BUFFER_SIZE_MSG, 0, (struct sockaddr *)&clientAddr, &addrLen);
+        if(receivedBytes > 0) {
+            buffer[receivedBytes] = '\0'; //null-terminate the received string
+            printf("Received message : %s\n", buffer);
+            logMessage(buffer);
 
-    while(1) {
-        //listen for incoming data packets from a client
-        int bytesReceived = recvfrom(fileSocket, fileBuffer, BUFFER_SIZE_FILE, 0, (struct sockaddr *)&clientAddr, &clientAddrLen);
-        if(bytesReceived == SOCKET_ERROR) {
-            printf("Error receiving data : %d\n", WSAGetLastError());
-            continue;
+            //store received message for broadcasting
+            strncpy(lastReceivedMessage, buffer, BUFFER_SIZE_MSG);
         }
-        fileBuffer[bytesReceived] = '\0'; //null-terminate received data
-
-        //end of file checker (EOF)
-        if(strcmp(fileBuffer,"EOF") == 0) {
-            newFileReady = 1; //trigger the broadcasting thread
-            fileOpenFlag = 0; //reset the flag so a new file is created for the next transmission
-            printf("End of file received, ready to broadcast...!\n");
-            continue;
-        }
-
-        //if file is not opened yet , generate a unique filename based on the current timestamp 
-        if(fileOpenFlag == 0) {
-            time_t now = time(NULL);
-            struct tm *tm_info = localtime(&now);
-            strftime(lastReceivedFile, sizeof(lastReceivedFile), SAVE_DIR "received_%Y%m%d_%H%M%S.txt", tm_info);
-            fileOpenFlag = 1; //mark the file as opened
-        }
-        // lock the critical section before writing to the file to prevent data corruption
-        EnterCriticalSection(&fileLock);
-        FILE *file = fopen(lastReceivedFile, "a"); // open file in append mode
-        if (file){
-            fwrite(fileBuffer, sizeof(char), bytesReceived, file);
-            fclose(file);
-            }
-        else {
-            printf("Error saving file : %s\n", lastReceivedFile);
-        }
-        LeaveCriticalSection(&fileLock);        //unlock file access
     }
     return 0;
 }
 
-//thread function to broadcast the latest received file
-DWORD WINAPI broadcastFileThread(LPVOID lpParam) {
-    while(1) {
-        if(newFileReady) {                  //check if a new file is ready for broadcasting
-            EnterCriticalSection(&fileLock);//lock access to prevent conflicts
+//thread to broadcast the last received message to all clients
+DWORD WINAPI broadcastMessageThread(LPVOID lpParam) {
+    while (serverRunning) {  // Keep running while the server is active
 
-            FILE *file = fopen(lastReceivedFile, "r");   //open the latest received file in read mode
-            if(file) {
-                char fileBuffer[BUFFER_SIZE_FILE];
-                size_t bytesRead;
+        // Check if there is a message to broadcast
+        if (strlen(lastReceivedMessage) > 0) {  
 
-                printf("Broadcasting file : %s\n", lastReceivedFile);
-                
-                //read the file chunk by chunk until fully transmitted
-                while((bytesRead = fread(fileBuffer,sizeof(char),BUFFER_SIZE_FILE - 1,file)) > 0){
-                    fileBuffer[bytesRead] = '\0'; //ensure proper null termination
-
-                    //broadcast the file contents over UDP
-                    int sendResult = sendto(fileBroadcastSocket, fileBuffer, bytesRead, 0, (struct sockaddr *)&fileBroadcastAddr, sizeof(fileBroadcastAddr));
-
-                    if(sendResult == SOCKET_ERROR) {
-                        printf("Error broadcasting file : %s (Error code : %d)\n", lastReceivedFile, WSAGetLastError());
-                        break;
-                    }
-                }
-                fclose(file);     //close file after sending all chunks
-                newFileReady = 0; //reset flag after broadcasting the file
-            }
+            // Send the message via the broadcast socket
+            if (sendto(messageBroadcastSocket, lastReceivedMessage, strlen(lastReceivedMessage), 0, (struct sockaddr*)&msgBroadcastAddr, sizeof(msgBroadcastAddr)) == SOCKET_ERROR) {
+                // If sending fails, log an error message
+                printf("Failed to broadcast message.\n");
+                logMessage("Failed to broadcast message.");
+            } 
             else {
-                printf("Error reading file for broadcasting : %s\n", lastReceivedFile);
+                // If sending succeeds, log success and show the message
+                printf("Message broadcasted successfully: %s\n", lastReceivedMessage);
+                logMessage("Message was broadcasted successfully.");
+                
+                // Reset the message buffer after broadcasting to allow re-broadcasting of identical messages
+                lastReceivedMessage[0] = '\0';
             }
-            LeaveCriticalSection(&fileLock); // unlock file access
         }
-        Sleep(500);        //check every 0.5 seconds for new files
+        Sleep(100);  // Small delay to prevent excessive CPU usage in the loop
     }
     return 0;
 }
 
-int main(){
-    WSAStartup(MAKEWORD(2, 2), &wsa);     //initialize Winsock API
+int main() {
+    printf("UDP Server starting...\n");
+    logMessage("UDP Server starting...");
     
-    InitializeCriticalSection(&fileLock); //initialize synchronization mechanism
+    if(WSAStartup(MAKEWORD(2,2),&wsa) != 0) {
+        printf("Winsock initialization failed..\n");
+        logMessage("Winsock initialization failed..");
+        return 1;
+    }
 
-    //create sockets for IP broadcasting,file broadcasting,and file reception
+    printf("Winsock initialized successfully..\n");
+    logMessage("Winsock initialized successfully..");
+    //create sockets for broadcasting IP, receiving messages, andbroadcasting messages
     ipBroadcastSocket = socket(AF_INET, SOCK_DGRAM, 0);
-    fileBroadcastSocket = socket(AF_INET, SOCK_DGRAM, 0);
-    fileSocket = socket(AF_INET, SOCK_DGRAM, 0);
+    messageReceiveSocket = socket(AF_INET, SOCK_DGRAM, 0);
+    messageBroadcastSocket = socket(AF_INET, SOCK_DGRAM, 0);
 
-    //enable broadcasting for IP and file sockets
+    if(ipBroadcastSocket == SOCKET_ERROR || messageReceiveSocket == SOCKET_ERROR || messageBroadcastSocket == SOCKET_ERROR) {
+        printf("Failed to create the sockets.\n");
+        logMessage("Failed to create the scokets.");
+        WSACleanup();
+        return 1;
+    }
+
+    //enable broadcsting for UDP sockets
     int enableBroadcasting = 1;
     setsockopt(ipBroadcastSocket, SOL_SOCKET, SO_BROADCAST, (char *)&enableBroadcasting, sizeof(enableBroadcasting));
-    setsockopt(fileBroadcastSocket, SOL_SOCKET, SO_BROADCAST, (char *)&enableBroadcasting, sizeof(enableBroadcasting));
+    setsockopt(messageBroadcastSocket, SOL_SOCKET, SO_BROADCAST, (char *)&enableBroadcasting, sizeof(enableBroadcasting));
 
-    //configure the IP and file broadcast addresses
+    //configure the IP broadcast address
     ipBroadcastAddr.sin_family = AF_INET;
     ipBroadcastAddr.sin_addr.s_addr = inet_addr(BROADCAST_IP);
     ipBroadcastAddr.sin_port = htons(IP_BROADCAST_PORT);
 
-    fileBroadcastAddr.sin_family = AF_INET;
-    fileBroadcastAddr.sin_addr.s_addr = inet_addr(BROADCAST_IP);
-    fileBroadcastAddr.sin_port = htons(FILE_BROADCAST_PORT);
+    //configure the message receiving socket
+    msgReceiveAddr.sin_family = AF_INET;
+    msgReceiveAddr.sin_addr.s_addr = INADDR_ANY;
+    msgReceiveAddr.sin_port = htons(MESSAGE_RECEIVE_PORT);
 
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_addr.s_addr = INADDR_ANY;
-    serverAddr.sin_port = htons(SERVER_PORT);
-    if(bind(fileSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR){
-        printf("Error binding file socket : %d\n", WSAGetLastError());
+    //configure the message broadcasting socket
+    msgBroadcastAddr.sin_family = AF_INET;
+    msgBroadcastAddr.sin_addr.s_addr = inet_addr(BROADCAST_IP);
+    msgBroadcastAddr.sin_port = htons(MESSAGE_BROADCAST_PORT);
+
+    //bind the receiving sockets so it can listen for incoming messages
+    if(bind(messageReceiveSocket,(struct sockaddr*)&msgReceiveAddr,sizeof(msgReceiveAddr)) == SOCKET_ERROR) {
+        printf("Binding failed for message receive socket.\n");
+        logMessage("Binding failed for message receive socket.");
+        closesocket(messageReceiveSocket);
+        WSACleanup();
         return 1;
     }
 
     getServerIP(serverIP);
-    printf("server running at : %s\n", serverIP);
+    printf("Server IP retreived : %s\n", serverIP);
+    logMessage("Server IP retreived");
 
-    //create three independent threads for broadcasting IP ,receiving files and broadcasting files
-    HANDLE hThreads[] = {
-        CreateThread(NULL, 0, broadcastIPThread, NULL, 0, NULL),
-        CreateThread(NULL, 0, receiveFileThread, NULL, 0, NULL),
-        CreateThread(NULL, 0, broadcastFileThread, NULL, 0, NULL)
-        };
+    //start the background threads
+    HANDLE hIPThread = CreateThread(NULL, 0, broadcastIPThread, NULL, 0, NULL);
+    HANDLE hRecvThread = CreateThread(NULL, 0, receiveMessageThread, NULL, 0, NULL);
+    HANDLE hBroadcastThread = CreateThread(NULL, 0, broadcastMessageThread, NULL, 0, NULL);
 
-    WaitForMultipleObjects(3, hThreads, TRUE, INFINITE);
+    printf("UDP Server is running successfully press ESC button to stop it.\n");
+    logMessage("UDP Server started successfully.");
 
+    //while loop to keeep the server running until ESC is pressed
+    while(serverRunning) {
+        if(GetAsyncKeyState(VK_ESCAPE)) { //check if ESC key is pressed
+            printf("ESC detected. shutting down server...\n ");
+            logMessage("Server shutting down due to ESC key press.");
+            serverRunning = 0; //stop the server
+            Sleep(100);        //small delay to prevent excessive looping
+        }
+    }
+
+    //cleanup before exiting
+    logMessage("Cleaning up resources...");
     closesocket(ipBroadcastSocket);
-    closesocket(fileBroadcastSocket);
-    closesocket(fileSocket);
+    closesocket(messageReceiveSocket);
+    closesocket(messageBroadcastSocket);
     WSACleanup();
-    DeleteCriticalSection(&fileLock);
+
+    printf("Server stopped successfully.\n");
+    logMessage("Server stopped successfully.");
+
     return 0;
-} 
+}
