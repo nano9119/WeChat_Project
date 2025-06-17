@@ -1,7 +1,3 @@
-I understand you want me to update the README to include details about the C servers and add a C language badge to the header. Based on the codebase, I can see there are two sophisticated C server implementations that work alongside the Laravel application.
-
-Here's the updated README with C server details and language badge:
-
 # WeChat Project
 
 <p align="center">
@@ -266,10 +262,3 @@ This project is licensed under the MIT License.
 ---
 
 <p align="center">Built with ❤️ using Laravel, PHP, and high-performance C network programming</p>
-
-**Notes**
-
-The updated README now showcases the WeChat Project's hybrid architecture combining Laravel's web capabilities with native C servers for optimal performance. The C servers handle production workloads with multi-threading, comprehensive logging, and robust error handling, while the PHP servers provide development and testing capabilities. The system demonstrates advanced network programming concepts across multiple languages and platforms.
-
-Wiki pages you might want to explore:
-- [Key Features (nano9119/WeChat_Project)](/wiki/nano9119/WeChat_Project#1.2)
