@@ -1,16 +1,10 @@
-# WeChat Project
+# WeChat Project  
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo">
+<p align="center">  
+  <em>Built with</em><br>  
+  <strong>Laravel 11.x</strong> • <strong>PHP 8.0+</strong> • <strong>C Network Programming</strong><br>  
+  <sub>Licensed under MIT</sub>  
 </p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Laravel-11.x-red.svg" alt="Laravel Version">
-  <img src="https://img.shields.io/badge/PHP-8.0+-blue.svg" alt="PHP Version">
-  <img src="https://img.shields.io/badge/C-Windows_Sockets-00599C.svg" alt="C Language">
-  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
-</p>
-
 ## 🚀 Overview
 
 The WeChat Project is a sophisticated multi-language application combining Laravel web functionality with high-performance C network servers. It features dual-stack architecture with PHP-based web services and native C socket servers for optimal performance in file processing and real-time communication.
