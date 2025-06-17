@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  ![Static Badge](https://img.shields.io/badge/:PHP-8.0+-blue.svg)
+  <img src="https://img.shields.io/badge/Laravel-11.x-red.svg" alt="Laravel Version">
   <img src="https://img.shields.io/badge/PHP-8.0+-blue.svg" alt="PHP Version">
   <img src="https://img.shields.io/badge/C-Windows_Sockets-00599C.svg" alt="C Language">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
