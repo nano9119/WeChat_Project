@@ -32,7 +32,6 @@ typedef struct {
 
 //threads and functions initial declaration
 DWORD WINAPI receiveFileThread(LPVOID lpParam);   //handles file reception
-
 DWORD WINAPI broadcastFileThread(LPVOID lpParam); //handles file broadcasting
 void addClient(SOCKET clientSocket);              //adds a client to list
 void removeClient(SOCKET clientSocket);          //removes a client from list
@@ -102,7 +101,6 @@ int main(){
         clientInfo->clientSocket = clientSocket;
         clientInfo->id = rand();
         CreateThread(NULL, 0, receiveFileThread, clientInfo, 0, NULL);
-        
     }
     closesocket(serverSocket);
     WSACleanup();
@@ -148,7 +146,6 @@ void removeClient(SOCKET clientSocket) {
 
 //thread to receive files
 DWORD WINAPI receiveFileThread(LPVOID lpParam) {
-    
     ClientInfo* clientInfo = (ClientInfo*)lpParam;
     SOCKET clientSocket = clientInfo->clientSocket;
     free(clientInfo); //free allocated memory after use
@@ -174,14 +171,10 @@ DWORD WINAPI receiveFileThread(LPVOID lpParam) {
         // Check for metadata (Header or EOF packets)
         if (strncmp(buffer, "[METADATA] ", 11) == 0) {
             sscanf(buffer + 11, "%s", lastReceivedFile);
-
-            char fullPath[512];
-            _snprintf(fullPath, sizeof(fullPath), "%s%s", SAVE_DIR, lastReceivedFile);
-            
-            printf("Receiving file: %s\n", fullPath);
+            printf("Receiving file: %s\n", lastReceivedFile);
             logMessage("Receiving new file.");
 
-            file = fopen(fullPath, "wb");
+            file = fopen(lastReceivedFile, "wb");
             if (!file) {
                 printf("Error opening file.\n");
                 LeaveCriticalSection(&fileLock);
@@ -207,9 +200,7 @@ DWORD WINAPI broadcastFileThread(LPVOID lpParam) {
     while(serverRunning) {
         if(newFileReady) {
             EnterCriticalSection(&fileLock);
-            char fullPath[512];
-            _snprintf(fullPath, sizeof(fullPath), "%s%s", SAVE_DIR, lastReceivedFile);
-            FILE* file = fopen(fullPath, "rb");
+            FILE* file = fopen(lastReceivedFile, "rb");
             if(!file) {
                 LeaveCriticalSection(&fileLock);
                 continue;

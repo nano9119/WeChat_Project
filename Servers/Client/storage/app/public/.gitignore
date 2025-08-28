@@ -1,0 +1,4 @@
+*
+!.gitignore
+$filename = time() . '_' . $uploadedFile->getClientOriginalName();
+$path = $uploadedFile->storeAs('uploads', $filename, 'public');
