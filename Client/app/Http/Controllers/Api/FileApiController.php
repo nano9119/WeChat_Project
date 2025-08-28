@@ -83,32 +83,20 @@ class FileApiController extends Controller
     }
 
     protected function sendToTcpServer($filePath, $filename)
-    {
-        $server = '127.0.0.1';
-        $port = 9090;
+{
+    // نحصل على IP السيرفر الديناميكي من الـ Cache
+    $serverIp = cache('server_ip', '127.0.0.1'); // fallback للـ localhost
+    $serverPort = 9090; // البورت نفسه كما كان
 
-        $sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+    // إنشاء TcpService باستخدام IP الديناميكي
+    $tcpService = new \App\Services\TcpService($serverIp, $serverPort);
 
-        if ($sock === false) {
-            \Log::error('❌ فشل في إنشاء اتصال TCP: ' . socket_strerror(socket_last_error()));
-            return;
-        }
+    // إرسال الملف
+    $success = $tcpService->sendFile($filePath, $filename);
 
-        if (!socket_connect($sock, $server, $port)) {
-            \Log::error('❌ فشل في الاتصال بسيرفر TCP: ' . socket_strerror(socket_last_error($sock)));
-            return;
-        }
-
-        socket_send($sock, "[METADATA] " . $filename, 1024, 0);
-
-        $file = fopen($filePath, 'rb');
-        while (!feof($file)) {
-            $chunk = fread($file, 4096);
-            socket_send($sock, $chunk, strlen($chunk), 0);
-        }
-        fclose($file);
-
-        socket_send($sock, "[EOF]", 1024, 0);
-        socket_close($sock);
+    if (!$success) {
+        \Log::error("❌ فشل إرسال الملف إلى TCP Server: $filename");
     }
+}
+
 }

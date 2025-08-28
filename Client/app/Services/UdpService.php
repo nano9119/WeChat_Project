@@ -10,7 +10,7 @@ class UdpService
     protected $port;
     protected $socket;
 
-    public function __construct($host = '192.168.137.1', $port = 9092)
+    public function __construct($host = '192.168.216.1', $port = 9092)
     {
         $this->host = $host;
         $this->port = $port;

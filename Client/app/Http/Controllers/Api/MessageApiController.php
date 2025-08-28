@@ -20,31 +20,38 @@ class MessageApiController extends Controller
     }
 
     public function store(Request $request)
-    {
-        Log::info('🔵 Request received:', $request->all());
+{
+    Log::info('🔵 Request received:', $request->all());
 
-        $request->validate([
-            'user_id' => 'required|exists:users,id',
-            'message' => 'required|string',
-        ]);
+    $request->validate([
+        'user_id' => 'required|exists:users,id',
+        'message' => 'required|string',
+    ]);
 
-        $message = Message::create([
-            'user_id' => $request->user_id,
-            'user_name' => $request->user_name ?? 'unknown',
-            'message' => $request->message,
-        ]);
+    $message = Message::create([
+        'user_id' => $request->user_id,
+        'user_name' => $request->user_name ?? 'unknown',
+        'message' => $request->message,
+    ]);
 
-        // 🔁 إرسال الرسالة إلى السيرفر UDP
-        try {
-            $udp = new UdpService();
-            $udp->send($request->message);  // أو استخدم message كاملة مع الاسم إن أحببت
-            Log::info('📤 Sent to UDP server:', ['message' => $request->message]);
-        } catch (\Exception $e) {
-            Log::error('❌ فشل الإرسال إلى سيرفر UDP: ' . $e->getMessage());
-        }
+    // 🔁 إرسال الرسالة إلى السيرفر UDP مع IP ديناميكي
+    try {
+        // نحصل على IP السيرفر الديناميكي من Cache
+        $serverIp = cache('server_ip', '127.0.0.1'); // fallback للـ localhost
+        $serverPort = 9092; // البورت نفسه الموجود في UdpService
 
-        return response()->json(['message' => new MessageResource($message)], 201);
+        // إنشاء UdpService باستخدام IP الديناميكي
+        $udp = new UdpService($serverIp, $serverPort);
+        $udp->send($request->message);
+
+        Log::info('📤 Sent to UDP server:', ['message' => $request->message, 'ip' => $serverIp]);
+    } catch (\Exception $e) {
+        Log::error('❌ فشل الإرسال إلى سيرفر UDP: ' . $e->getMessage());
     }
+
+    return response()->json(['message' => new MessageResource($message)], 201);
+}
+
 
     public function update(Request $request, Message $message)
     {
