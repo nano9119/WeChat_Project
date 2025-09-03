@@ -24,14 +24,16 @@ use App\Http\Controllers\Api\MessageApiController;
     Route::get('/user', fn() => auth()->user());
 
     // Messages
-    Route::apiResource('messages', MessageApiController::class);
+    Route::middleware('auth:sanctum')->apiResource('messages', MessageApiController::class);
 
     // Files
-    Route::apiResource('files', FileApiController::class);
+    Route::middleware('auth:sanctum')->apiResource('files', FileApiController::class);
     Route::post('/files/upload/{id}', [FileApiController::class, 'update']);
 });
 
 // ✅ مسارات للمشرف فقط
-Route::middleware(['auth:sanctum', 'admin'])->group(function () {
-    Route::apiResource('users', UserApiController::class);
+    Route::middleware(['auth:sanctum'])->group(function () {
+    Route::put('users/{user}', [UserApiController::class, 'update'])->middleware('canUpdateUser');
+    Route::apiResource('users', UserApiController::class)->except(['update']);
 });
+

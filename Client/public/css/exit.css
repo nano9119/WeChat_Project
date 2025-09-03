@@ -1,0 +1,188 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
+
+:root {
+    /* Light Mode Colors */
+    --light-primary-color: #4d8fb5; /* Dark Purple */
+    --light-accent-color: #648f95;  /* Lighter Purple */
+    --light-background-color: #f0f2f5;
+    --light-card-background: #ffffff;
+    --light-text-color: #333333;
+    --light-border-color: #dddddd;
+    --light-shadow-color: rgba(0, 0, 0, 0.1);
+
+    /* Dark Mode Colors */
+    --dark-primary-color: #9c27b0;  /* Purple */
+    --dark-accent-color: #ab47bc;   /* Lighter Purple */
+    --dark-background-color: #1a1a2e; /* Dark Blue */
+    --dark-card-background: #16213e; /* Even darker blue */
+    --dark-text-color: #e0e0e0;
+    --dark-border-color: #3f476a;
+    --dark-shadow-color: rgba(0, 0, 0, 0.4);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Cairo', sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background-color: var(--light-background-color);
+    color: var(--light-text-color);
+    direction: rtl; /* For Arabic layout */
+    text-align: center;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Dark Mode specific styles */
+body.dark-mode {
+    background-color: var(--dark-background-color);
+    color: var(--dark-text-color);
+}
+
+.farewell-container {
+    background-color: var(--light-card-background);
+    border-radius: 15px;
+    box-shadow: 0 10px 30px var(--light-shadow-color);
+    padding: 40px;
+    width: 100%;
+    max-width: 500px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 25px; /* Spacing between elements */
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+body.dark-mode .farewell-container {
+    background-color: var(--dark-card-background);
+    box-shadow: 0 10px 30px var(--dark-shadow-color);
+}
+
+.farewell-icon {
+    font-size: 4em;
+    color: var(--light-primary-color);
+    margin-bottom: 10px;
+    transition: color 0.3s ease;
+}
+
+body.dark-mode .farewell-icon {
+    color: var(--dark-primary-color);
+}
+
+h1 {
+    font-size: 2.8em;
+    margin-bottom: 10px;
+    color: var(--light-primary-color);
+    transition: color 0.3s ease;
+}
+
+body.dark-mode h1 {
+    color: var(--dark-primary-color);
+}
+
+p {
+    font-size: 1.1em;
+    line-height: 1.6;
+    color: #555; /* Slightly lighter for readability */
+    transition: color 0.3s ease;
+}
+
+body.dark-mode p {
+    color: #bbb;
+}
+
+.farewell-actions {
+    display: flex;
+    flex-direction: column; /* Stack buttons on small screens */
+    gap: 15px;
+    width: 100%;
+    margin-top: 20px;
+}
+
+.button {
+    display: block; /* Make links behave like block buttons */
+    padding: 15px 25px;
+    border-radius: 8px;
+    font-size: 1.1em;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 0.3s ease, transform 0.2s ease, border-color 0.3s ease, color 0.3s ease;
+    text-align: center;
+}
+
+.primary-button {
+    background-color: transparent;
+    /* background-color: var(--light-primary-color); */
+    color: var(--light-primary-color);
+    border: 2px solid var(--light-primary-color);
+}
+
+.primary-button:hover {
+    background-color: var(--light-accent-color);
+    border-color: var(--light-accent-color);
+    color: white;
+    transform: translateY(-2px);
+}
+
+body.dark-mode .primary-button {
+    background-color: var(--dark-primary-color);
+    border-color: var(--dark-primary-color);
+}
+
+body.dark-mode .primary-button:hover {
+    background-color: var(--dark-accent-color);
+    border-color: var(--dark-accent-color);
+}
+
+.secondary-button {
+    background-color: transparent;
+    color: var(--light-primary-color);
+    border: 2px solid var(--light-primary-color);
+}
+
+.secondary-button:hover {
+    background-color: var(--light-primary-color);
+    color: white;
+    transform: translateY(-2px);
+}
+
+body.dark-mode .secondary-button {
+    color: var(--dark-primary-color);
+    border-color: var(--dark-primary-color);
+}
+
+body.dark-mode .secondary-button:hover {
+    background-color: var(--dark-primary-color);
+    color: white;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 600px) {
+    .farewell-container {
+        padding: 30px;
+        border-radius: 0; /* Full width on mobile */
+        height: 100vh;
+        justify-content: center;
+        box-shadow: none;
+    }
+    .farewell-icon {
+        font-size: 3em;
+    }
+    h1 {
+        font-size: 2em;
+    }
+    p {
+        font-size: 1em;
+    }
+    .button {
+        padding: 12px 20px;
+        font-size: 1em;
+    }
+}
